@@ -1,58 +1,73 @@
-from flask import Flask, render_template, request, redirect, url_for
-from git import Repo
-from fpdf import FPDF
+from flask import Flask, request, render_template
 import os
-from google.cloud import storage
-from getpass import getpass
+import shutil
+import subprocess
 
 app = Flask(__name__)
 
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/')
 def index():
-    if request.method == 'POST':
-        git_username = request.form['git_username']
-        generate_release_notes(git_username)
-        return redirect(url_for('download_release_notes'))
-    if request.method == 'GET':
-        git_username = input("Enter your GitHub Username : ")
-        # git_password = getpass("Password")
-        generate_release_notes(git_username)
-        download_to_bucket()
-    return render_template('web_page.html')
+    return render_template('index.html')
 
+@app.route('/upload', methods=['POST'])
+def upload():
+    if 'repositoryArchive' not in request.files:
+        return 'No file uploaded', 400
 
-def generate_release_notes(git_username):
-    # Fetch the Git repository for the specified username
-    repo = Repo.clone_from(f'https://github.com/{git_username}/AI_Technothon',"temp_repo",branch='main')
+    file = request.files['repositoryArchive']
+    if file.filename == '':
+        return 'No selected file', 400
 
-    # Access the commits and generate release notes
-    commits = list(repo.iter_commits())
-    release_notes = ""
+    # Create a temporary directory to store the uploaded file
+    temp_dir = 'temp'
+    os.makedirs(temp_dir, exist_ok=True)
+    file_path = os.path.join(temp_dir, file.filename)
+    file.save(file_path)
+
+    # Extract the repository archive
+    extract_dir = os.path.splitext(file.filename)[0]
+    shutil.unpack_archive(file_path, extract_dir)
+
+    # Change the working directory to the extracted repository directory
+    os.chdir(extract_dir)
+
+    try:
+        # Access the commit history
+        commit_history = subprocess.check_output(['git', 'log']).decode('utf-8')
+
+        # Parse the commit history and generate release notes
+        release_notes = parse_commit_history(commit_history)
+
+        # Clean up temporary files and directory
+        os.chdir('..')
+        shutil.rmtree(temp_dir)
+
+        return render_template('release_notes.html', form_data=release_notes)
+    except subprocess.CalledProcessError:
+        return render_template('index2.html')
+
+def parse_commit_history(commit_history):
+    commits = commit_history.split('\n\n')
+    release_notes = []
     for commit in commits:
-        release_notes += f"Commit ID: {commit.hexsha}\n"
-        release_notes += f"Author: {commit.author.name}\n"
-        release_notes += f"Date: {commit.authored_datetime}\n"
-        release_notes += f"Message: {commit.message}\n\n"
-
-    # Create a PDF file with the release notes
-    pdf = ""
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    pdf.cell(200, 10, txt=release_notes, ln=1)
-    pdf.output("release_notes.pdf")
-
-def download_to_bucket():
-    storage_client = storage.Client()
-    temp_bucket = storage_client.bucket("bucket_for_ai_technothon")
-    temp_bolb = temp_bucket.blob("release_notes.pdf")
-
-    temp_bolb.upload_from_filename("/home/hemanthpusala531/AI_Technothon/templates/release_notes.pdf")
-
-@app.route('/download')
-def download_release_notes():
-    return redirect(url_for('static', filename='release_notes.pdf'))
-
+        commit_data = {}
+        lines = commit.strip().split('\n')
+        for line in lines:
+            if line.startswith('Author'):
+                author_parts = line.split(':',1)
+                if len(author_parts) > 1:
+                    commit_data['Author'] = author_parts[1].strip()
+            elif line.startswith('Date'):
+                    date_parts = line.split(':',1)
+                    if len(date_parts) > 1:
+                        commit_data['Date'] = date_parts[1].strip()
+            else:
+                if 'Message' in commit_data:
+                    commit_data['Message'] += '\n' + line.strip()
+                else:
+                    commit_data['Message'] = line.strip()
+        if commit_data:
+            release_notes.append(commit_data)
+    return release_notes
 if __name__ == '__main__':
-    port= int(os.environ.get('PORT',8003))
-    app.run(debug=True,host='0.0.0.0',port=port)
+    app.run()
