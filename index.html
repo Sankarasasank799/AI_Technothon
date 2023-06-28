@@ -1,15 +1,28 @@
 <!DOCTYPE html>
+
 <html>
-    <head>
-        <title>Auto Release Notes</title>
-    </head>
+
+<head>
+
+  <title>Upload Git Repository Archive</title>
+
+</head>
+
 <body>
-    <h1>Auto Release Notes</h1>
-    <form method="post" action="/">
-        <label for="git_username">Git Username:</label>
-        <input type="text" id="git_username" name="git_username">
-        <br><br>
-        <input type="submit" value="Generate Release Notes">
-    </form>
+
+  <h1>Upload Git Repository Archive</h1>
+
+  <form action="/upload" method="POST" enctype="multipart/form-data">
+
+    <input type="file" name="repositoryArchive" accept=".zip,.tar">
+
+    <input type="submit" value="Upload">
+
+    <h1>{{release_notes}}</h1>
+
+  </form>
+
 </body>
+
 </html>
+
